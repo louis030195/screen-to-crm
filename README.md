@@ -1,5 +1,7 @@
 # screen-activity-callback
 
+classify whats happening on ur screen w computer vision & trigger ur callback
+
 ## usage
 
 ```python
