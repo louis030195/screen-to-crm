@@ -1,0 +1,11 @@
+packaging
+flash_attn
+numpy
+Pillow
+requests
+torch
+torchvision
+transformers
+accelerate 
+argparse 
+
