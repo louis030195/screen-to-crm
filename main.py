@@ -3,9 +3,9 @@ import asyncio
 import time
 from PIL import ImageGrab, Image
 import csv
-import pytesseract
 import json
-from mlc_llm import MLCEngine
+import requests
+from transformers import FuyuProcessor, FuyuForCausalLM
 
 # pylint: disable=pointless-string-statement
 """
@@ -43,63 +43,15 @@ def capture_screen():
     return im
 
 
-def process_image_with_tesseract(image):
-    """Process the captured image and generate text using Tesseract."""
-    text = pytesseract.image_to_string(image)
-    return text
-
-
 async def on_activity(activity: str):
     """Trigger actions based on the activity text."""
-    # if "urgent" in activity:
-    #     await send_alert(activity)
-    # elif "meeting" in activity:
-    #     await schedule_meeting(activity)
-    # update_crm(activity)
     print(activity)
 
 
-async def send_alert(activity):
-    """Send an alert based on the activity."""
-    print(f"Alert: {activity}")
+def build_prompt(leads, accounts):
 
-
-async def schedule_meeting(activity):
-    """Schedule a meeting based on the activity."""
-    print(f"Scheduling meeting: {activity}")
-
-
-def process_text_with_logic_processor(text, logic_processor_model):
-    """Process the extracted text using a logic processor model."""
-    inputs = logic_processor_model.tokenizer(text, return_tensors="pt").to("mps")
-    generation_args = {
-        "max_new_tokens": 500,
-        "temperature": 0.7,
-        "do_sample": True,
-    }
-    print("Processing text with logic processor...")
-    generate_ids = logic_processor_model.generate(
-        **inputs,
-        eos_token_id=logic_processor_model.tokenizer.eos_token_id,
-        **generation_args,
-    )
-    response = logic_processor_model.tokenizer.batch_decode(
-        generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
-    )[0]
-    return response
-
-
-def build_prompt(screen_texts, leads, accounts, batch_size):
-    """Build the prompt for the logic processor."""
-    batched_text = {
-        "frames": [
-            {"frame_number": i + 1, "text": text} for i, text in enumerate(screen_texts)
-        ]
-    }
-    batched_text = json.dumps(batched_text, indent=4)
     prompt = (
-        f"You are an AI assistant that get text from a user screen doing sales (through OCR) and you job is to update a CRM system with the data extracted from the screen."
-        f"This is the extracted text on the user's screen over the past {batch_size} frames: \n\n{batched_text}\n\n"
+        f"You are an AI assistant that gets screenshots from a user screen doing sales and your job is to update a CRM system with the data extracted from the screen."
         f"Leads CSV content: {json.dumps(leads, indent=4)}\n\n"
         f"Accounts CSV content: {json.dumps(accounts, indent=4)}\n\n"
         "Return a JSON function call to update the CRM system with the processed text."
@@ -107,46 +59,55 @@ def build_prompt(screen_texts, leads, accounts, batch_size):
     return prompt
 
 
-async def main_loop(batch_size, sleep_interval, test_data_file):
+async def main_loop(batch_size, sleep_interval, test_data_folder):
     """Main loop to capture screen, extract text, and process it with another model."""
     leads = read_csv("leads.csv")
     accounts = read_csv("accounts.csv")
 
-    logic_processor_model = MLCEngine("HF://mlc-ai/Llama-3-8B-Instruct-q4f16_1-MLC")
+    model_id = "adept/fuyu-8b"
+    processor = FuyuProcessor.from_pretrained(model_id)
+    model = FuyuForCausalLM.from_pretrained(model_id, device_map="mps")
 
-    screen_texts = []
+    images = []
 
-    if test_data_file:
-        with open(test_data_file, "r") as file:
-            test_data = json.load(file)
-        for entry in test_data["frames"]:
-            screen_texts.append(entry["text"])
-            if len(screen_texts) >= batch_size:
-                prompt = build_prompt(screen_texts, leads, accounts, batch_size)
-                response = logic_processor_model.chat.completions.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    model="HF://mlc-ai/Llama-3-8B-Instruct-q4f16_1-MLC",
-                    stream=False,
+    if test_data_folder:
+        import os
+        from PIL import Image
+
+
+        for filename in sorted(os.listdir(test_data_folder)):
+            if filename.endswith((".png", ".jpg", ".jpeg")):
+                image = Image.open(os.path.join(test_data_folder, filename)).convert(
+                    "RGB"
                 )
-                processed_text = response.choices[0].message.content
+                images.append(image)
+
+            if len(images) >= batch_size:
+                prompt = build_prompt(leads, accounts)
+                inputs = processor(text=prompt, images=images, return_tensors="pt").to(
+                    "mps"
+                )
+                generation_output = model.generate(**inputs, max_new_tokens=500)
+                processed_text = processor.batch_decode(
+                    generation_output, skip_special_tokens=True
+                )[0]
                 await on_activity(processed_text)
-                screen_texts = []
+                images = []
     else:
         while True:
             image = capture_screen()
-            text = process_image_with_tesseract(image)
-            screen_texts.append(text)
 
-            if len(screen_texts) >= batch_size:
-                prompt = build_prompt(screen_texts, leads, accounts, batch_size)
-                response = logic_processor_model.chat.completions.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    model="HF://mlc-ai/Llama-3-8B-Instruct-q4f16_1-MLC",
-                    stream=False,
-                )
-                processed_text = response.choices[0].message.content
+            if len(images) >= batch_size:
+                prompt = build_prompt(leads, accounts)
+                inputs = processor(
+                    text=prompt, images=images, return_tensors="pt"
+                ).to("mps")
+                generation_output = model.generate(**inputs, max_new_tokens=500)
+                processed_text = processor.batch_decode(
+                    generation_output, skip_special_tokens=True
+                )[0]
                 await on_activity(processed_text)
-                screen_texts = []
+                images = []
 
             time.sleep(sleep_interval)
 
@@ -168,10 +129,10 @@ if __name__ == "__main__":
         help="Time to sleep between capturing screen frames (in seconds).",
     )
     parser.add_argument(
-        "--test_data_file",
-        default="test_data.json",
+        "--test_data_folder",
+        default="test_data",
         type=str,
-        help="Path to JSON file containing test data.",
+        help="Path to folder containing test data.",
     )
 
     args = parser.parse_args()
