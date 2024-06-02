@@ -1,52 +1,11 @@
-# screen-activity-callback
 
-classify whats happening on ur screen w computer vision & trigger ur callback
+i was reaching out to 250 persons / week for sales and hated switching between linkedin and google sheet (CRM) so i automated the google sheet fill using AI:
 
-## usage
+https://github.com/louis030195/screen-activity-callback/assets/25003283/805f6583-f3b8-4ec0-b95e-c9849f156d1b
 
-```python
-
-
-def on_activity(activity: str):
-  push_to_db(activity, {"time": time.time()})
-
-sac(on_activity)
-```
-
-correlate ur activity w ur biotech wearable:
+this is very alpha version obviously :)
 
 
-```python
-def on_activity(activity: str):
-  ouraring_tag(activity, {"time": time.time()}))
-
-sac(on_activity)
-```
-
-```python
-def on_activity(activity: str):
-  brain_computer_interface_tag(activity, {"time": time.time()}))
-
-sac(on_activity)
-```
+the idea is that you do your sales stuff and your CRM is filled automatically (sheets, salesforce, etc.)
 
 
-automation
-
-```python
-def on_activity(activity: str):
-  bad = llm(f"is this activity bad for me? {activity}")
-  if bad:
-    initiate_autodestruction()
-
-sac(on_activity)
-```
-
-```python
-def on_activity(activity: str):
-  good = llm(f"is this activity good for me? {activity}")
-  if good:
-    deliver_chocolate()
-
-sac(on_activity)
-```
